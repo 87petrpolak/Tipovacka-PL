@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tipovacka-pl",
+      "runtimeExecutable": "/Users/petrpolak/Library/CloudStorage/GoogleDrive-petr@polakzceska.cz/My Drive/Github/Tipovacka-PL/.venv/bin/streamlit",
+      "runtimeArgs": ["run", "main.py"],
+      "port": 8501
+    }
+  ]
+}
