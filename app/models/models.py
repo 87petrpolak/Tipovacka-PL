@@ -53,6 +53,7 @@ class Gameweek(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     number: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    reminder_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     fixtures: Mapped[list["Fixture"]] = relationship(
         "Fixture", back_populates="gameweek", order_by="Fixture.id"

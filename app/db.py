@@ -1,6 +1,6 @@
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 
@@ -60,9 +60,23 @@ def get_db():
 def init_db():
     from app.models import models  # noqa: F401 — registers all models
     Base.metadata.create_all(engine)
+    _migrate_additive()
     from app.services.seed import seed_if_empty
     db = SessionLocal()
     try:
         seed_if_empty(db)
     finally:
         db.close()
+
+
+def _migrate_additive():
+    """Přídavné migrace pro sloupce přidané po prvním nasazení."""
+    with engine.connect() as conn:
+        if _is_sqlite:
+            cols = {row[1] for row in conn.execute(text("PRAGMA table_info(gameweeks)"))}
+            if "reminder_sent_at" not in cols:
+                conn.execute(text("ALTER TABLE gameweeks ADD COLUMN reminder_sent_at DATETIME"))
+                conn.commit()
+        else:
+            conn.execute(text("ALTER TABLE gameweeks ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMP"))
+            conn.commit()

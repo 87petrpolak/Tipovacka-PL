@@ -22,6 +22,7 @@ participants = db.query(Participant).order_by(Participant.name).all()
 gameweeks = db.query(Gameweek).order_by(Gameweek.number).all()
 if not participants or not gameweeks:
     st.warning("Chybí účastníci nebo rozlosování.")
+    db.close()
     st.stop()
 
 default_gw = current_gameweek(db)
@@ -301,3 +302,5 @@ if _desktop:
     render_desktop()
 else:
     render_mobile()
+
+db.close()
