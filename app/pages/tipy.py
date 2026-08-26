@@ -150,14 +150,14 @@ def render_mobile() -> None:
                 h = st.number_input(
                     f"⚽ {fixture.home_team.name}", min_value=0, max_value=15, step=1,
                     value=existing.tip_home if existing else 0,
-                    key=f"home_{fixture.id}",
+                    key=f"home_{participant.id}_{fixture.id}",
                     disabled=locked,
                 )
             with c2:
                 a = st.number_input(
                     f"⚽ {fixture.away_team.name}", min_value=0, max_value=15, step=1,
                     value=existing.tip_away if existing else 0,
-                    key=f"away_{fixture.id}",
+                    key=f"away_{participant.id}_{fixture.id}",
                     disabled=locked,
                 )
             tip_inputs[(participant.id, fixture.id)] = (h, a)
