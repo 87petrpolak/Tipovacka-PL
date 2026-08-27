@@ -37,6 +37,7 @@ else:
     engine = create_engine(
         _DB_URL,
         pool_pre_ping=True,
+        connect_args={"connect_timeout": 10},
         pool_size=2,
         max_overflow=3,
         pool_recycle=300,
