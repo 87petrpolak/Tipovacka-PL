@@ -165,9 +165,19 @@ def refresh_scorer_stats(db: Session) -> None:
 
 
 def current_gameweek(db: Session) -> Gameweek | None:
-    """První kolo, které ještě nemá všechny zápasy dohrané — kolo pro tipování."""
-    gameweeks = db.query(Gameweek).order_by(Gameweek.number).all()
-    for gw in gameweeks:
-        if any(not f.is_finished for f in gw.fixtures):
-            return gw
-    return gameweeks[-1] if gameweeks else None
+    """První kolo, které ještě nemá všechny zápasy dohrané — kolo pro tipování.
+
+    Jeden dotaz místo N+1 (dřív se pro každé kolo zvlášť lazy-loadovaly
+    fixtures — 38 dalších dotazů navíc, znatelně pomalé na pomalejším
+    síťovém spojení, např. z cloudové naplánované úlohy).
+    """
+    gw = (
+        db.query(Gameweek)
+        .join(Fixture, Fixture.gameweek_id == Gameweek.id)
+        .filter(Fixture.is_finished == False)  # noqa: E712
+        .order_by(Gameweek.number)
+        .first()
+    )
+    if gw is not None:
+        return gw
+    return db.query(Gameweek).order_by(Gameweek.number.desc()).first()
