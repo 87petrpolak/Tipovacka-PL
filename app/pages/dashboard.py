@@ -1,5 +1,5 @@
 import pandas as pd
-import streamlit as st
+import streamlit as st  # redeploy nudge — Streamlit Cloud nezvedlo commit cf24f68 samo
 
 from app.services.data_refresh import refresh_results
 from app.services.leaderboard import get_breakdown_rows, get_totals
