@@ -89,13 +89,16 @@ def get_breakdown_rows(db: Session) -> list[BreakdownRow]:
 
     # Nejnovější zápas nahoře; zápasy bez známého času (staré/chybějící kickoff_at)
     # padnou na konec podle čísla kola. V rámci stejného zápasu nejdřív všechny tipy
-    # (podle účastníka), pak všechny nominace střelců (podle účastníka).
+    # (podle účastníka), pak nominace střelců — nejdřív všechny góly, pak všechny
+    # asistence, pak "bez G/A" (podle účastníka v rámci každé skupiny).
+    nomination_order = {"gól": 0, "asistence": 1, "bez G/A": 2}
     rows.sort(key=lambda r: (
         r.match_time is None,
         -(r.match_time.timestamp() if r.match_time else 0),
         -r.gameweek,
         r.match_label,
         r.kind,
+        nomination_order.get(r.result, 0),
         r.participant,
     ))
     return rows
