@@ -17,6 +17,7 @@ class BreakdownRow:
     match_id: int
     match_label: str
     match_time: datetime | None
+    kind: int = 0  # 0 = tip na zápas, 1 = nominace střelce — jen pro řazení, nezobrazuje se
 
 
 def get_totals(db: Session) -> dict[str, float]:
@@ -78,21 +79,23 @@ def get_breakdown_rows(db: Session) -> list[BreakdownRow]:
         if nom.goals > 0:
             pts = 5.0 + (nom.goals - 1) * 2.0
             label = f"{player_name}" + (f" ({nom.goals}x gól)" if nom.goals > 1 else "")
-            rows.append(BreakdownRow(nom.participant.name, nom.gameweek.number, label, "gól", pts, match_id, match_label, match_time))
+            rows.append(BreakdownRow(nom.participant.name, nom.gameweek.number, label, "gól", pts, match_id, match_label, match_time, kind=1))
         if nom.assists > 0:
             pts = 2.0 + (nom.assists - 1) * 1.0
             label = f"{player_name}" + (f" ({nom.assists}x asistence)" if nom.assists > 1 else "")
-            rows.append(BreakdownRow(nom.participant.name, nom.gameweek.number, label, "asistence", pts, match_id, match_label, match_time))
+            rows.append(BreakdownRow(nom.participant.name, nom.gameweek.number, label, "asistence", pts, match_id, match_label, match_time, kind=1))
         if nom.goals == 0 and nom.assists == 0 and nom.played:
-            rows.append(BreakdownRow(nom.participant.name, nom.gameweek.number, player_name, "bez G/A", -2.0, match_id, match_label, match_time))
+            rows.append(BreakdownRow(nom.participant.name, nom.gameweek.number, player_name, "bez G/A", -2.0, match_id, match_label, match_time, kind=1))
 
     # Nejnovější zápas nahoře; zápasy bez známého času (staré/chybějící kickoff_at)
-    # padnou na konec podle čísla kola. V rámci stejného zápasu řadíme podle jména.
+    # padnou na konec podle čísla kola. V rámci stejného zápasu nejdřív všechny tipy
+    # (podle účastníka), pak všechny nominace střelců (podle účastníka).
     rows.sort(key=lambda r: (
         r.match_time is None,
         -(r.match_time.timestamp() if r.match_time else 0),
         -r.gameweek,
         r.match_label,
+        r.kind,
         r.participant,
     ))
     return rows
