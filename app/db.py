@@ -4,20 +4,30 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 
+def _normalize_pg_url(url: str) -> str:
+    """Vynutí driver psycopg (v3) explicitně — bez toho si SQLAlchemy může
+    na nepodporované verzi Pythonu zvolit dialekt, pro který chybí balíček
+    (viděno: zkusilo `psycopg`, ale nainstalovaný byl jen psycopg2-binary)."""
+    url = url.replace("postgres://", "postgresql://", 1)
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url[len("postgresql://"):]
+    return url
+
+
 def _get_db_url() -> str:
     # 1. Streamlit secrets (produkce — Supabase/Postgres)
     try:
         import streamlit as st
         url = st.secrets.get("DATABASE_URL", "")
         if url:
-            return url.replace("postgres://", "postgresql://", 1)
+            return _normalize_pg_url(url)
     except Exception:
         pass
 
     # 2. Env proměnná (lokální vývoj s Postgres)
     url = os.environ.get("DATABASE_URL", "")
     if url:
-        return url.replace("postgres://", "postgresql://", 1)
+        return _normalize_pg_url(url)
 
     # 3. SQLite fallback (lokální vývoj)
     db_path = os.environ.get("TIPOVACKA_PL_DB", "tipovacka_pl.db")
