@@ -37,14 +37,16 @@ def main() -> None:
     db = SessionLocal()
     try:
         log = refresh_results(db)
+        # Hodnoty si vytáhneme, dokud je session otevřená — po db.close() by
+        # přístup k atributům spadl na DetachedInstanceError.
+        success, added, updated, skipped, notes = (
+            log.success, log.records_added, log.records_updated, log.records_skipped, log.notes,
+        )
     finally:
         db.close()
 
-    print(
-        f"success={log.success} added={log.records_added} "
-        f"updated={log.records_updated} skipped={log.records_skipped} notes={log.notes}"
-    )
-    if not log.success:
+    print(f"success={success} added={added} updated={updated} skipped={skipped} notes={notes}")
+    if not success:
         sys.exit(1)
 
 
