@@ -69,7 +69,7 @@ else:
 
     df = pd.DataFrame(
         [{"Kolo": r.gameweek, "Účastník": r.participant, "Zápas nebo hráč - výsledek": r.label,
-          "Výsledek": vysledek, "Body": r.points} for r, vysledek in zip(rows, vysledky)]
+          "Výsledek": vysledek, "Body": int(r.points)} for r, vysledek in zip(rows, vysledky)]
     )
 
     def _style_vysledek(_col: pd.Series) -> list[str]:
