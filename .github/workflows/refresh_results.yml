@@ -21,4 +21,5 @@ jobs:
       - name: Refresh results
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PYTHONPATH: ${{ github.workspace }}
         run: python scripts/refresh_results_ci.py
