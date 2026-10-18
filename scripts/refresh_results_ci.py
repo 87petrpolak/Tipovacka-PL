@@ -8,7 +8,19 @@ Vyžaduje DATABASE_URL v prostředí (stejná hodnota jako v Streamlit Cloud
 secrets — přímé Postgres spojení, ne REST API).
 """
 import os
+import socket
 import sys
+
+# GitHub Actions runnery umí IPv6 jen naoko — AAAA záznam Supabase poolu
+# se jim ale "Network is unreachable". Donutíme resolver vracet jen IPv4.
+_orig_getaddrinfo = socket.getaddrinfo
+
+
+def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
+
+socket.getaddrinfo = _ipv4_only_getaddrinfo
 
 if not os.environ.get("DATABASE_URL"):
     # app.db._get_db_url() by bez DATABASE_URL tiše spadlo na lokální SQLite
