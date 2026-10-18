@@ -1,7 +1,26 @@
 import os
+import socket
+from urllib.parse import urlparse
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+
+
+def _resolve_ipv4_hostaddr(url: str) -> str | None:
+    """IPv4 adresa Postgres hostitele, nebo None když se nepodaří zjistit.
+
+    Supabase pooler hostname má i AAAA (IPv6) záznam, ale řada prostředí
+    (GitHub Actions runnery, a zjevně i občas Streamlit Cloud) na IPv6
+    reálně nedosáhne — spojení pak padá na OperationalError. `hostaddr`
+    donutí psycopg připojit se rovnou na IPv4, zatímco `host` v URL
+    zůstává zachovaný pro TLS ověření."""
+    try:
+        host = urlparse(url).hostname
+        if not host:
+            return None
+        return socket.getaddrinfo(host, None, socket.AF_INET)[0][4][0]
+    except Exception:
+        return None
 
 
 def _normalize_pg_url(url: str) -> str:
@@ -44,10 +63,14 @@ if _is_sqlite:
         pool_pre_ping=True,
     )
 else:
+    _connect_args = {"connect_timeout": 10}
+    _hostaddr = _resolve_ipv4_hostaddr(_DB_URL)
+    if _hostaddr:
+        _connect_args["hostaddr"] = _hostaddr
     engine = create_engine(
         _DB_URL,
         pool_pre_ping=True,
-        connect_args={"connect_timeout": 10},
+        connect_args=_connect_args,
         pool_size=2,
         max_overflow=3,
         pool_recycle=300,
