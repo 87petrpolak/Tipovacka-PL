@@ -43,14 +43,37 @@ for i, (name, pts) in enumerate(ranked):
 st.divider()
 st.subheader("📋 Co se dělo")
 
+# (popisek, barva pozadí, barva textu) pro každý typ výsledku — řídí se
+# podle r.result, interní klíče (viz leaderboard.py) zůstávají beze změny.
+RESULT_STYLE: dict[str, tuple[str, str, str]] = {
+    "přesný výsledek": ("Přesný výsledek", "#1b5e20", "white"),
+    "trefená tendence": ("Trefená tendence", "#f9a825", "black"),
+    "netrefeno": ("Netrefeno", "#b71c1c", "white"),
+    "gól": ("Gól", "#1b5e20", "white"),
+    "asistence": ("Asistence", "#1b5e20", "white"),
+    "bez G/A": ("Bez G/A", "#b71c1c", "white"),
+}
+
 rows = get_breakdown_rows(db)
 if not rows:
     st.info("Zatím žádné odehrané zápasy — jakmile se odehraje první kolo, zobrazí se tu bodování.")
 else:
+    vysledky = []
+    barvy = []
+    for r in rows:
+        label, bg, fg = RESULT_STYLE.get(r.result, (r.result, "#444444", "white"))
+        vysledky.append(f"{r.tip} - {label}" if r.tip else label)
+        barvy.append((bg, fg))
+
     df = pd.DataFrame(
-        [{"Kolo": r.gameweek, "Účastník": r.participant, "Zápas nebo hráč": r.label,
-          "Výsledek": r.result, "Body": r.points} for r in rows]
+        [{"Kolo": r.gameweek, "Účastník": r.participant, "Zápas nebo hráč - výsledek": r.label,
+          "Výsledek": vysledek, "Body": r.points} for r, vysledek in zip(rows, vysledky)]
     )
-    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    def _style_vysledek(_col: pd.Series) -> list[str]:
+        return [f"background-color: {bg}; color: {fg}; font-weight: 600;" for bg, fg in barvy]
+
+    styled = df.style.apply(_style_vysledek, subset=["Výsledek"])
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
 db.close()

@@ -18,6 +18,7 @@ class BreakdownRow:
     match_label: str
     match_time: datetime | None
     kind: int = 0  # 0 = tip na zápas, 1 = nominace střelce — jen pro řazení, nezobrazuje se
+    tip: str | None = None  # "2:0" u tipů na zápas; u nominací None
 
 
 def get_totals(db: Session) -> dict[str, float]:
@@ -58,6 +59,7 @@ def get_breakdown_rows(db: Session) -> list[BreakdownRow]:
         rows.append(BreakdownRow(
             pred.participant.name, fixture.gameweek.number, label, result, pred.points,
             fixture.id, label, fixture.kickoff_at,
+            tip=f"{pred.tip_home}:{pred.tip_away}",
         ))
 
     nominations = (
