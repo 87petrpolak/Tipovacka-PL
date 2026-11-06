@@ -110,7 +110,11 @@ def _migrate_additive():
             cols = {row[1] for row in conn.execute(text("PRAGMA table_info(gameweeks)"))}
             if "reminder_sent_at" not in cols:
                 conn.execute(text("ALTER TABLE gameweeks ADD COLUMN reminder_sent_at DATETIME"))
-                conn.commit()
+            cols = {row[1] for row in conn.execute(text("PRAGMA table_info(players)"))}
+            if "is_active" not in cols:
+                conn.execute(text("ALTER TABLE players ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
+            conn.commit()
         else:
             conn.execute(text("ALTER TABLE gameweeks ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMP"))
+            conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE"))
             conn.commit()

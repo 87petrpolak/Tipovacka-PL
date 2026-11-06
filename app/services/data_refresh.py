@@ -90,9 +90,71 @@ def _recompute_predictions(db: Session, fixture: Fixture) -> None:
     db.commit()
 
 
+def sync_squad(db: Session, team: Team, scraped: list[dict]) -> dict[str, int]:
+    """Srovná hráče týmu v DB s aktuální soupiskou z Livesportu.
+
+    Nový hráč se přidá, přestupující se přesune (jen pokud na něm nevisí nominace,
+    jinak by se přepsala historie), hráč mimo soupisku se jen skryje (is_active=False)
+    — nominace na něj zůstávají v historii. Prázdná soupiska = chyba stahování, nic nemažeme."""
+    stats = {"added": 0, "moved": 0, "deactivated": 0, "reactivated": 0}
+    if not scraped:
+        return stats
+
+    live_ids = set()
+    for p in scraped:
+        live_ids.add(p["external_id"])
+        player = db.query(Player).filter(Player.external_id == p["external_id"]).first()
+        if player is None:
+            player = db.query(Player).filter(Player.name == p["name"], Player.team_id == team.id).first()
+            if player is not None:
+                player.external_id = p["external_id"]
+        if player is None:
+            db.add(Player(name=p["name"], position=p["position"], external_id=p["external_id"],
+                          team_id=team.id, is_active=True))
+            stats["added"] += 1
+            continue
+
+        if player.team_id != team.id:
+            if db.query(ScorerNomination).filter(ScorerNomination.player_id == player.id).first():
+                continue  # historie nominací patří původnímu týmu
+            player.team_id = team.id
+            stats["moved"] += 1
+        player.name = p["name"]
+        player.position = p["position"] or player.position
+        if not player.is_active:
+            player.is_active = True
+            stats["reactivated"] += 1
+
+    for player in db.query(Player).filter(Player.team_id == team.id, Player.is_active == True).all():  # noqa: E712
+        if player.external_id not in live_ids:
+            player.is_active = False
+            stats["deactivated"] += 1
+
+    db.commit()
+    return stats
+
+
+def refresh_squads(db: Session) -> dict[str, int]:
+    """Znovu stáhne soupisky všech 20 týmů. Chyba u jednoho týmu neshodí ostatní."""
+    sync_teams(db)
+    totals = {"added": 0, "moved": 0, "deactivated": 0, "reactivated": 0, "failed_teams": 0}
+    for team in db.query(Team).filter(Team.external_id.isnot(None), Team.slug.isnot(None)).all():
+        try:
+            scraped = lp.scrape_squad(team.slug, team.external_id)
+        except Exception:
+            totals["failed_teams"] += 1
+            continue
+        for k, v in sync_squad(db, team, scraped).items():
+            totals[k] += v
+    return totals
+
+
 def ensure_squad(db: Session, team: Team) -> list[Player]:
-    """Načte soupisku týmu z Livesportu, pokud ji ještě nemáme v DB."""
-    existing = db.query(Player).filter(Player.team_id == team.id).all()
+    """Aktivní hráči týmu; když tým nemá žádné, soupisku nejdřív stáhne z Livesportu."""
+    def active() -> list[Player]:
+        return db.query(Player).filter(Player.team_id == team.id, Player.is_active == True).all()  # noqa: E712
+
+    existing = active()
     if existing:
         return existing
 
@@ -107,20 +169,8 @@ def ensure_squad(db: Session, team: Team) -> list[Player]:
     except Exception:
         return []
 
-    players = []
-    for p in scraped:
-        player = db.query(Player).filter(Player.external_id == p["external_id"]).first()
-        if not player:
-            player = Player(
-                name=p["name"],
-                position=p["position"],
-                external_id=p["external_id"],
-                team_id=team.id,
-            )
-            db.add(player)
-        players.append(player)
-    db.commit()
-    return db.query(Player).filter(Player.team_id == team.id).all()
+    sync_squad(db, team, scraped)
+    return active()
 
 
 def refresh_scorer_stats(db: Session) -> None:

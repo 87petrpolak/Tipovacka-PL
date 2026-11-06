@@ -149,7 +149,10 @@ def nomination_slot(
         return None
 
     team = next(t for t in teams if t.name == team_name)
-    squad = sorted(ensure_squad(db, team), key=lambda p: p.name)
+    squad = ensure_squad(db, team)
+    if nom and nom.player.team_id == team.id and nom.player not in squad:
+        squad = squad + [nom.player]  # už zvolený hráč, co mezitím odešel ze soupisky
+    squad = sorted(squad, key=lambda p: p.name)
     squad_names = [p.name for p in squad]
     default_player_name = nom.player.name if (nom and nom.player.team_id == team.id) else NO_PLAYER
     player_options = [NO_PLAYER] + squad_names

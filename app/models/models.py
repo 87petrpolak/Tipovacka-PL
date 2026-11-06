@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint,
+    Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,6 +40,7 @@ class Player(Base):
     position: Mapped[Optional[str]] = mapped_column(String(10))
     external_id: Mapped[Optional[str]] = mapped_column(String(100), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true(), nullable=False)
 
     team: Mapped[Optional["Team"]] = relationship("Team", back_populates="players")
     nominations: Mapped[list["ScorerNomination"]] = relationship("ScorerNomination", back_populates="player")
