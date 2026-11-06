@@ -9,7 +9,6 @@ from app.state import get_db
 from app.utils.responsive import is_desktop_view, render_layout_override_toggle
 from app.utils.time_local import to_prague_str
 
-NO_TEAM = "— žádný —"
 NO_PLAYER = "— žádný —"
 
 st.title("📝 Zadávání tipů")
@@ -124,47 +123,100 @@ def save_nominations(participant_id: int, chosen_player_ids: list[int]) -> tuple
     return True, skipped_names
 
 
-def nomination_slot(
-    key_prefix: str, nom: ScorerNomination | None, label_team: str = "Tým", label_player: str = "Hráč"
-) -> int | None:
-    """Vykreslí pár Tým/Hráč selectboxů, vrátí zvolené player_id (nebo None).
+def save_all(
+    tip_inputs: dict[tuple[int, int], tuple[int, int]],
+    existing_preds: dict[tuple[int, int], Prediction],
+    chosen_by_participant: dict[int, list[int]],
+) -> None:
+    """Uloží tipy i nominace jedním tahem a zprávy o výsledku uloží do session_state
+    (po st.rerun() by se jinak ztratily)."""
+    flash: list[tuple[str, str]] = []
 
-    Tým, jehož zápas je už uzamčený, nejde nově vybrat (zmizí z nabídky) — pokud je ale
-    uzamčený tým už dřív zvolený (existující nominace), zůstane vidět, jen needitovatelný."""
-    default_team_name = nom.player.team.name if (nom and nom.player.team) else NO_TEAM
-    default_team_id = nom.player.team_id if nom else None
-    default_locked = default_team_id in locked_team_ids if default_team_id else False
+    skipped_tips = save_predictions(tip_inputs, existing_preds)
+    if skipped_tips:
+        flash.append(("warning", f"Tyhle zápasy mezitím začaly, tipy na ně se neuložily: {', '.join(skipped_tips)}."))
 
-    team_options = [NO_TEAM] + [
-        t.name for t in teams if t.id not in locked_team_ids or t.id == default_team_id
-    ]
-    team_name = st.selectbox(
-        label_team, team_options,
-        index=team_options.index(default_team_name) if default_team_name in team_options else 0,
-        key=f"{key_prefix}_team",
-        disabled=default_locked,
+    dup_names, skipped_players = [], []
+    names = {p.id: p.name for p in participants}
+    for participant_id, chosen in chosen_by_participant.items():
+        ok, skipped = save_nominations(participant_id, chosen)
+        if not ok:
+            dup_names.append(names[participant_id])
+        skipped_players.extend(skipped)
+    if skipped_players:
+        flash.append((
+            "warning",
+            f"Tihle hráči mají zápas, co už začal, nominace na ně se neuložila: {', '.join(dict.fromkeys(skipped_players))}.",
+        ))
+    if dup_names:
+        flash.append((
+            "error",
+            f"Nominace se neuložily ({', '.join(dup_names)}): stejného hráče nelze nominovat dvakrát. Tipy na zápasy jsou uložené.",
+        ))
+    if not flash:
+        flash.append(("success", "Vše uloženo — tipy i nominace."))
+    st.session_state["tipy_flash"] = flash
+
+
+for _kind, _text in st.session_state.pop("tipy_flash", []):
+    getattr(st, _kind)(_text)
+
+
+# Jeden vyhledávací výběr hráče ("Tým · Jméno") místo dvojice Tým → Hráč: v selectboxu jde psát
+# jméno hráče i název týmu ("Chelsea" vyfiltruje celý tým), a protože na sobě výběry nezávisí,
+# můžou být v jednom formuláři s tipy (= jedno tlačítko Uložit).
+_team_name_by_id = {t.id: t.name for t in teams}
+_active_team_ids = {
+    tid for (tid,) in db.query(Player.team_id).filter(Player.is_active == True).distinct()  # noqa: E712
+}
+for _t in teams:
+    if _t.id not in _active_team_ids:
+        ensure_squad(db, _t)  # tým bez soupisky v DB — stáhne se při prvním otevření
+
+_all_players = sorted(
+    db.query(Player).filter(Player.is_active == True, Player.team_id.isnot(None)).all(),  # noqa: E712
+    key=lambda p: (_team_name_by_id.get(p.team_id, ""), p.name),
+)
+_selectable_ids = [p.id for p in _all_players if p.team_id not in locked_team_ids]
+_label_by_id: dict[int, str] = {p.id: f"{_team_name_by_id.get(p.team_id, '?')} · {p.name}" for p in _all_players}
+
+
+def _player_label(player_id: int | None) -> str:
+    if player_id is None:
+        return NO_PLAYER
+    if player_id not in _label_by_id:
+        p = db.get(Player, player_id)
+        _label_by_id[player_id] = f"{_team_name_by_id.get(p.team_id, '?')} · {p.name}" if p else "?"
+    return _label_by_id[player_id]
+
+
+def nomination_slot(key_prefix: str, nom: ScorerNomination | None, label: str = "Hráč") -> int | None:
+    """Vykreslí vyhledávací výběr hráče, vrátí zvolené player_id (nebo None).
+
+    Hráči týmů s už uzamčeným zápasem se nově vybrat nedají (nejsou v nabídce); pokud je takový
+    hráč už nominovaný, zůstane vidět, jen needitovatelný."""
+    nom_player_id = nom.player_id if nom else None
+    locked = nom.player.team_id in locked_team_ids if nom else False
+
+    options: list[int | None] = [None] + list(_selectable_ids)
+    if nom_player_id is not None and nom_player_id not in options:
+        options.append(nom_player_id)  # uzamčený nebo mezitím ze soupisky odešlý hráč
+
+    return st.selectbox(
+        label, options,
+        index=options.index(nom_player_id) if nom_player_id in options else 0,
+        format_func=_player_label,
+        key=f"{key_prefix}_gw{gameweek.id}_pick",
+        disabled=locked,
+        help="Piš jméno hráče nebo název týmu (např. „Chelsea“) a nabídka se vyfiltruje.",
     )
-    if team_name == NO_TEAM:
-        st.selectbox(label_player, [NO_PLAYER], key=f"{key_prefix}_player_disabled", disabled=True)
-        return None
 
-    team = next(t for t in teams if t.name == team_name)
-    squad = ensure_squad(db, team)
-    if nom and nom.player.team_id == team.id and nom.player not in squad:
-        squad = squad + [nom.player]  # už zvolený hráč, co mezitím odešel ze soupisky
-    squad = sorted(squad, key=lambda p: p.name)
-    squad_names = [p.name for p in squad]
-    default_player_name = nom.player.name if (nom and nom.player.team_id == team.id) else NO_PLAYER
-    player_options = [NO_PLAYER] + squad_names
-    player_name = st.selectbox(
-        label_player, player_options,
-        index=player_options.index(default_player_name) if default_player_name in player_options else 0,
-        key=f"{key_prefix}_player",
-        disabled=default_locked,
-    )
-    if player_name == NO_PLAYER:
-        return None
-    return next(p.id for p in squad if p.name == player_name)
+
+NOMINATION_CAPTION = (
+    "Gól 5 bodů (další +2), asistence 2 body (další +1). "
+    "Hráč, který hrál a nedal gól ani asistenci, dostane -2 body. "
+    "Do pole piš jméno hráče nebo název týmu."
+)
 
 
 # ----------------------------------------------------------------------
@@ -176,7 +228,6 @@ def render_mobile() -> None:
     )
     participant = next(p for p in participants if p.name == participant_name)
 
-    st.subheader("⚽ Tipy na výsledky")
     existing_preds = {
         (participant.id, p.fixture_id): p
         for p in db.query(Prediction).filter(
@@ -184,8 +235,14 @@ def render_mobile() -> None:
             Prediction.fixture_id.in_([f.id for f in fixtures]),
         ).all()
     }
+    existing_noms = db.query(ScorerNomination).filter(
+        ScorerNomination.participant_id == participant.id,
+        ScorerNomination.gameweek_id == gameweek.id,
+    ).all()
+    existing_noms_by_slot = existing_noms + [None] * (3 - len(existing_noms))
 
     with st.form("tips_form_mobile"):
+        st.subheader("⚽ Tipy na výsledky")
         tip_inputs = {}
         for fixture in fixtures:
             fixture_locked = fixture.id in locked_fixture_ids
@@ -217,42 +274,16 @@ def render_mobile() -> None:
                     st.caption(f"⏳ Uzávěrka: {to_prague_str(fdl)}")
             st.divider()
 
-        if st.form_submit_button("💾 Uložit tipy na zápasy", type="primary"):
-            skipped = save_predictions(tip_inputs, existing_preds)
-            if skipped:
-                st.warning(f"Tyhle zápasy mezitím začaly, tipy na ně se neuložily: {', '.join(skipped)}. Ostatní tipy jsou uložené.")
-            else:
-                st.success("Tipy uloženy.")
-            st.rerun()
+        st.subheader("🎯 Nominace střelců (0–3 hráči)")
+        st.caption(NOMINATION_CAPTION)
+        chosen_player_ids = []
+        for i in range(3):
+            pid = nomination_slot(f"mob_{participant.id}_{i}", existing_noms_by_slot[i], label=f"Hráč {i + 1}")
+            if pid is not None:
+                chosen_player_ids.append(pid)
 
-    st.divider()
-    st.subheader("🎯 Nominace střelců (0–3 hráči)")
-    st.caption(
-        "Gól 5 bodů (další +2), asistence 2 body (další +1). "
-        "Hráč, který hrál a nedal gól ani asistenci, dostane -2 body."
-    )
-
-    existing_noms = db.query(ScorerNomination).filter(
-        ScorerNomination.participant_id == participant.id,
-        ScorerNomination.gameweek_id == gameweek.id,
-    ).all()
-    existing_noms_by_slot = existing_noms + [None] * (3 - len(existing_noms))
-
-    chosen_player_ids = []
-    for i in range(3):
-        st.markdown(f"**Hráč {i + 1}**")
-        pid = nomination_slot(f"mob_{participant.id}_{i}", existing_noms_by_slot[i])
-        if pid is not None:
-            chosen_player_ids.append(pid)
-
-    if st.button("💾 Uložit nominace střelců", type="primary"):
-        ok, skipped = save_nominations(participant.id, chosen_player_ids)
-        if not ok:
-            st.error("Stejného hráče nelze nominovat dvakrát.")
-        else:
-            if skipped:
-                st.warning(f"Tihle hráči mají zápas, co už začal, nominace na ně se neuložila: {', '.join(skipped)}.")
-            st.success("Nominace uloženy.")
+        if st.form_submit_button("💾 Uložit vše", type="primary", use_container_width=True):
+            save_all(tip_inputs, existing_preds, {participant.id: chosen_player_ids})
             st.rerun()
 
 
@@ -260,14 +291,16 @@ def render_mobile() -> None:
 # Počítač: všichni účastníci najednou, jedno kolo na jedné obrazovce
 # ----------------------------------------------------------------------
 def render_desktop() -> None:
-    st.subheader("⚽ Tipy na výsledky — všichni najednou")
-
     existing_preds = {
         (p.participant_id, p.fixture_id): p
         for p in db.query(Prediction).filter(Prediction.fixture_id.in_([f.id for f in fixtures])).all()
     }
+    existing_noms_by_participant: dict[int, list] = {p.id: [] for p in participants}
+    for n in db.query(ScorerNomination).filter(ScorerNomination.gameweek_id == gameweek.id).all():
+        existing_noms_by_participant[n.participant_id].append(n)
 
     with st.form("tips_form_desktop"):
+        st.subheader("⚽ Tipy na výsledky — všichni najednou")
         tip_inputs = {}
         for fixture in fixtures:
             fixture_locked = fixture.id in locked_fixture_ids
@@ -307,58 +340,31 @@ def render_desktop() -> None:
                         )
                         tip_inputs[(participant.id, fixture.id)] = (h, a)
 
-        if st.form_submit_button("💾 Uložit tipy všech", type="primary"):
-            skipped = save_predictions(tip_inputs, existing_preds)
-            if skipped:
-                st.warning(f"Tyhle zápasy mezitím začaly, tipy na ně se neuložily: {', '.join(skipped)}. Ostatní tipy jsou uložené.")
-            else:
-                st.success("Tipy uloženy.")
-            st.rerun()
+        st.divider()
+        st.subheader("🎯 Nominace střelců — všichni najednou")
+        st.caption(NOMINATION_CAPTION)
 
-    st.divider()
-    st.subheader("🎯 Nominace střelců — všichni najednou")
-    st.caption(
-        "Gól 5 bodů (další +2), asistence 2 body (další +1). "
-        "Hráč, který hrál a nedal gól ani asistenci, dostane -2 body."
-    )
-
-    existing_noms_by_participant: dict[int, list] = {p.id: [] for p in participants}
-    for n in db.query(ScorerNomination).filter(ScorerNomination.gameweek_id == gameweek.id).all():
-        existing_noms_by_participant[n.participant_id].append(n)
-
-    nom_cols = st.columns(len(participants))
-    chosen_by_participant: dict[int, list[int]] = {}
-    for i, participant in enumerate(participants):
-        with nom_cols[i]:
-            with st.container(border=True, key=f"nomcard_{participant.id}"):
-                st.markdown(f"<div class='participant-chip participant-chip-lg'>{participant.name}</div>", unsafe_allow_html=True)
-                st.markdown("")
-                slots = existing_noms_by_participant[participant.id] + [None] * 3
-                chosen: list[int] = []
-                for slot_idx in range(3):
-                    pid = nomination_slot(
-                        f"desk_{participant.id}_{slot_idx}", slots[slot_idx],
-                        label_team=f"Tým {slot_idx + 1}", label_player=f"Hráč {slot_idx + 1}",
+        nom_cols = st.columns(len(participants))
+        chosen_by_participant: dict[int, list[int]] = {}
+        for i, participant in enumerate(participants):
+            chosen: list[int] = []
+            with nom_cols[i]:
+                with st.container(border=True, key=f"nomcard_{participant.id}"):
+                    st.markdown(
+                        f"<div class='participant-chip participant-chip-lg'>{participant.name}</div>",
+                        unsafe_allow_html=True,
                     )
-                    if pid is not None:
-                        chosen.append(pid)
-                    st.markdown("")
+                    slots = existing_noms_by_participant[participant.id] + [None] * 3
+                    for slot_idx in range(3):
+                        pid = nomination_slot(
+                            f"desk_{participant.id}_{slot_idx}", slots[slot_idx], label=f"Hráč {slot_idx + 1}",
+                        )
+                        if pid is not None:
+                            chosen.append(pid)
             chosen_by_participant[participant.id] = chosen
 
-    if st.button("💾 Uložit nominace všech", type="primary"):
-        errors = []
-        all_skipped: list[str] = []
-        for participant in participants:
-            ok, skipped = save_nominations(participant.id, chosen_by_participant[participant.id])
-            if not ok:
-                errors.append(participant.name)
-            all_skipped.extend(skipped)
-        if errors:
-            st.error(f"Stejného hráče nelze nominovat dvakrát ({', '.join(errors)}).")
-        else:
-            if all_skipped:
-                st.warning(f"Tihle hráči mají zápas, co už začal, nominace na ně se neuložila: {', '.join(dict.fromkeys(all_skipped))}.")
-            st.success("Nominace uloženy.")
+        if st.form_submit_button("💾 Uložit vše", type="primary", use_container_width=True):
+            save_all(tip_inputs, existing_preds, chosen_by_participant)
             st.rerun()
 
 
